@@ -1,0 +1,4 @@
+path "concourse/*" {
+  policy = "read"
+} 
+

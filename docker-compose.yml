@@ -1,0 +1,116 @@
+version: "3.7"
+
+services:
+  traefik:
+    image: "traefik:v2.1"
+    container_name: "traefik"
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.leresolver.acme.httpchallenge=true"
+      - "--certificatesresolvers.leresolver.acme.httpchallenge.entrypoint=web"
+      - "--certificatesresolvers.leresolver.acme.email=${letsencrypt_admin_email}"
+      - "--certificatesresolvers.leresolver.acme.storage=/letsencrypt/acme.json"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./letsencrypt:/letsencrypt:rw
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  concourse_web:
+    image: concourse/concourse
+    command: web
+    links: [db]
+    depends_on:
+      - db
+      - vault
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./concourse/keys:/concourse-keys:rw
+      - ./vault/certs:/vault-certs:ro
+    environment:
+      CONCOURSE_EXTERNAL_URL: ${concourse_external_url}
+      CONCOURSE_POSTGRES_HOST: db
+      CONCOURSE_POSTGRES_USER: ${postgres_user}
+      CONCOURSE_POSTGRES_PASSWORD: ${postgres_password}
+      CONCOURSE_POSTGRES_DATABASE: concourse
+      CONCOURSE_ADD_LOCAL_USER: root:${concourse_root_password}
+      CONCOURSE_MAIN_TEAM_LOCAL_USER: root
+      # CONCOURSE_VAULT_URL: ${vault_external_url}
+      # CONCOURSE_VAULT_AUTH_BACKEND: approle
+      # CONCOURSE_VAULT_AUTH_PARAM: role_id:changeme,secret_id:changeme
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.middlewares.concoursehttpsredirect.redirectscheme.scheme=https"
+      - "traefik.http.middlewares.concoursehttpsredirect.redirectscheme.port=443"
+      - "traefik.http.middlewares.concoursehttpsredirect.redirectscheme.permanent=true"
+      - "traefik.http.routers.concourse.middlewares=concoursehttpsredirect"
+      - "traefik.http.routers.concourse.rule=Host(`${concourse_host}`)"
+      - "traefik.http.routers.concourse.entrypoints=web"
+      - "traefik.http.routers.concoursetls.rule=Host(`${concourse_host}`)"
+      - "traefik.http.routers.concoursetls.entrypoints=websecure"
+      - "traefik.http.routers.concourestls.tls=true"
+      - "traefik.http.routers.concoursetls.tls.certresolver=leresolver"
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "5"
+        max-size: "10m"
+
+  concourse_worker:
+    image: concourse/concourse
+    command: worker
+    privileged: true
+    depends_on:
+      - concourse_web
+      - vault
+    volumes:
+      - ./concourse/keys:/concourse-keys:rw
+    links:
+      - concourse_web
+    stop_signal: SIGUSR2
+    environment:
+      CONCOURSE_TSA_HOST: concourse_web:2222
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "5"
+        max-size: "11m"
+
+  vault:
+    image: "vault:1.3.2"
+    ports:
+      - "8200:8200"
+    volumes:
+      - ./vault/file:/vault/file:rw
+      - ./vault/config:/vault/config:ro
+    cap_add:
+      - IPC_LOCK
+    entrypoint: vault server -config=/vault/config/vault.hcl
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.middlewares.vaulthttpsredirect.redirectscheme.scheme=https"
+      - "traefik.http.middlewares.vaulthttpsredirect.redirectscheme.port=443"
+      - "traefik.http.middlewares.vaulthttpsredirect.redirectscheme.permanent=true"
+      - "traefik.http.routers.vault.middlewares=vaulthttpsredirect"
+      - "traefik.http.routers.vault.rule=Host(`${vault_host}`)"
+      - "traefik.http.routers.vault.entrypoints=web"
+      - "traefik.http.routers.vault-secure.rule=Host(`${vault_host}`)"
+      - "traefik.http.routers.vault-secure.entrypoints=websecure"
+      - "traefik.http.routers.vault-secure.tls=true"
+      - "traefik.http.routers.vault-secure.tls.certresolver=leresolver"
+
+  db:
+    image: postgres
+    environment:
+      POSTGRES_DB: ${postgres_database}
+      POSTGRES_PASSWORD: ${postgres_password}
+      POSTGRES_USER: ${postgres_user}
+      PGDATA: /database
+    volumes:
+      - ./postgres-data:/database
+
