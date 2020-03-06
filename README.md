@@ -1,4 +1,4 @@
-# Concourse-vault-traefik
+# Concourse-vault
 
 <a rel="noopener noreferrer" target="_blank" href="https://concourse-ci.org">Concourse-CI</a> deployed alongside <a rel="noopener noreferrer" target="_blank" href="https://www.vaultproject.io">Vault</a> inside a <a rel="noopener noreferrer" target="_blank" href="https://www.digitalocean.com">DigitalOcean</a> droplet, behind <a rel="noopener noreferrer" target="_blank" href="https://traefik.io">Træfik</a>.
 
@@ -6,32 +6,39 @@
 
 Deploy with <a rel="noopener noreferrer" target="_blank" href="https://www.terraform.io">Terraform</a>:
 
-1. The simplest way is to create `provide.tfvars` as such:
+1. The simplest way is to create `provide.tfvars` for non-required variables, if needed.
 
     ```hcl
     # provide.tfvars
     domain = "example.com"
     records = {
     "ci."    = { "type" = "A", "value" = "droplet", "domain" = "example.com", "ttl" = 86400 }
-    "vault." = { "type" = "A", "value" = "droplet", "domain" = "exampleo.com", "ttl" = 86400 }
+    "vault." = { "type" = "A", "value" = "droplet", "domain" = "example.com", "ttl" = 86400 }
     }
     user = "concourse-host-user"
-    ssh_keys = [123456, "00:00:00:00:00:00:00:00:00:00:00:00:de:ad:be:ef"]
     letsencrypt_admin_email = "postmaster@example.com"
-    vault_external_url      = "https://vault.example.com"
-    concourse_external_url  = "https://ci.example.com"
     postgres_user           = "concourse"
     ```
 
-2. The `do_token`, `postgres_password` and `concourse_root_password` will be prompted on creation, but again, environment variables are simpler. Below there's code to generate passwords as well.
+2. The following variables are required and will be prompted for during the `apply` operation, but again, environment variables are simpler. Below there's code to generate passwords as well.
+
+    - `do_token`
+    - `postgres_password`
+    - `concourse_root_password`
+    - `vault_external_url`
+    - `concourse_external_url`
+    - `ssh_keys` 
 
     ```bash
-    ~$ export TF_VAR_do_token=your-digitalocean-token
-    ~$ export TF_VAR_postgres_password=$(head /dev/urandom | tr -dc a-zA-Z0-9 | head -c 64)
-    ~$ export TF_VAR_concourse_root_password=$(head /dev/urandom | tr -dc a-zA-Z0-9 | head -c 64)
+    $ export TF_VAR_do_token=your-digitalocean-token
+    $ export TF_VAR_postgres_password=$(head /dev/urandom | tr -dc a-zA-Z0-9 | head -c 64)
+    $ export TF_VAR_concourse_root_password=$(head /dev/urandom | tr -dc a-zA-Z0-9 | head -c 64)
+    $ export TF_VAR_vault_external_url=https://vault.example.com
+    $ export TF_VAR_concourse_external_url=https://ci.example.com
+    $ export TF_VAR_ssh_keys='[123456, "00:00:00:00:00:00:00:00:00:00:00:00:de:ad:be:ef"]'
     ```
 
-3. Run initialize terraform, get modules and apply config
+3. Initialize terraform, get modules and apply config
 
     ```bash
     $ terraform init
@@ -100,9 +107,9 @@ path "concourse/all/*" {
   capabilities = ["create", "read", "update", "delete", "list"]
 }
 
-# Use templated policies to add a path unique to each user.
+# Use templated policies to add a path unique to each user, if need be.
 # See https://www.vaultproject.io/docs/concepts/policies/#templated-policies
-path "concourse/{{identity.entity.id}}" {
+path "concourse/{{identity.entity.id}}/*" {
   capabilities = ["create", "read", "update", "delete", "list"]
 }
 
